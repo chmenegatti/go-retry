@@ -1,8 +1,8 @@
 <div align="center">
   <img src="img/logo.jpg" alt="goretry logo" width="300" />
   <h1>🚀 goretry</h1>
-  <p><b>A modern, robust, and DX-focused retry library for Go.</b></p>
-  
+  <p><b>A minimal, composable, and production-ready retry library for Go.</b></p>
+
   [![Go Reference](https://pkg.go.dev/badge/github.com/chmenegatti/go-retry.svg)](https://pkg.go.dev/github.com/chmenegatti/go-retry)
   [![Go Report Card](https://goreportcard.com/badge/github.com/chmenegatti/go-retry)](https://goreportcard.com/report/github.com/chmenegatti/go-retry)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
@@ -10,19 +10,21 @@
 
 <br/>
 
-`goretry` was built from the ground up to solve the headaches of retrying operations in Go. It embraces modern Go paradigms like **Generics** and **context.Context**, shipping with enterprise-grade defaults like **Exponential Backoff** and **Full Jitter** to prevent melting your servers under load.
+`goretry` is a zero-dependency retry library built around a clean, fluent API. It respects `context.Context` cancellation immediately, supports pluggable backoff strategies, and includes Generics so your functions can return values directly.
 
-All of this with **Zero Dependencies**, fully relying on the Go standard library.
+---
 
 ## ✨ Why `goretry`?
 
-* 🎯 **Context First:** Cancellation (`ctx.Done()`) is respected immediately. No waiting for a 10-second sleep to finish before your goroutine can exit.
-* 🧬 **Generics Support:** Read your returned objects straight from the retry loop. No more awkward variable closures.
-* ⚡ **Convenient API:** Package-level shortcuts like `retry.DoFunc` making it ready to use with zero friction for simple cases.
-* 🛑 **Smart Filtering:** Ignore specific errors (e.g., `400 Bad Request`) using `WithRetryIf` to save computing time.
-* 📈 **Sensible Defaults:** Exponential backoff with Full Jitter activated by default, preventing [Thundering Herds](https://en.wikipedia.org/wiki/Thundering_herd_problem). **Pluggable** with `WithBackoff`.
-* 🪝 **Observability Ready:** Use hooks like `OnRetry`, `OnSuccess` and `OnDrop` to log or ship metrics precisely when failures and recoveries happen.
-* 🪶 **Featherweight:** 0 external dependencies. `stdlib` only!
+| Feature | Detail |
+|---|---|
+| 🎯 **Context First** | `ctx.Done()` is respected *between* attempts — no waiting for a long sleep to finish |
+| 🔗 **Fluent API** | Method chaining: `retry.New().Attempts(5).Backoff(Exponential(100ms)).Do(ctx, fn)` |
+| 🧬 **Generics** | `DoValue[T]` returns values directly — no captures outside the closure |
+| 📈 **4 Backoff Strategies** | `Constant`, `Linear`, `Exponential`, `ExponentialJitter` — or bring your own |
+| 🪝 **Lifecycle Hook** | `OnRetry(func(attempt int, err error))` for logging and metrics |
+| ⚡ **Zero Allocations** | `~2.6 ns/op, 0 allocs/op` on the success path |
+| 🪶 **Zero Dependencies** | Pure `stdlib`. No external packages. |
 
 ---
 
@@ -32,183 +34,206 @@ All of this with **Zero Dependencies**, fully relying on the Go standard library
 go get github.com/chmenegatti/go-retry
 ```
 
-*(Requires Go 1.18+ for Generics support)*
+> Requires **Go 1.18+** for Generics support.
 
 ---
 
 ## 💻 Quick Start
 
-### The Modern Way (Returning Values with Generics)
+### Simple error-only retry
 
-No more capturing variables outside the closure. Use `retry.Do` to smoothly return your fetched data:
+```go
+import retry "github.com/chmenegatti/go-retry"
+
+err := retry.New().
+    Attempts(5).
+    Backoff(retry.ExponentialJitter(100 * time.Millisecond)).
+    Do(ctx, func() error {
+        return callUnstableService()
+    })
+```
+
+### Returning a value
+
+Use `DoValue[T]` to return a typed result directly from the retry loop — no variable capture needed:
+
+```go
+import retry "github.com/chmenegatti/go-retry"
+
+user, err := retry.DoValue(ctx,
+    retry.New().Attempts(3).Backoff(retry.Exponential(200*time.Millisecond)),
+    func() (*User, error) {
+        return db.FindUser(id)
+    },
+)
+```
+
+### With `OnRetry` for observability
+
+```go
+err := retry.New().
+    Attempts(5).
+    Backoff(retry.ExponentialJitter(100 * time.Millisecond)).
+    OnRetry(func(attempt int, err error) {
+        log.Printf("⚠️  attempt %d failed: %v", attempt, err)
+        metrics.Inc("retry.attempt")
+    }).
+    Do(ctx, func() error {
+        return callUnstableService()
+    })
+```
+
+### HTTP request with server-error detection
 
 ```go
 package main
 
 import (
-	"context"
-	"fmt"
-	"io"
-	"net/http"
-	"time"
+    "context"
+    "fmt"
+    "io"
+    "log"
+    "net/http"
+    "time"
 
-	"github.com/chmenegatti/go-retry"
+    retry "github.com/chmenegatti/go-retry"
 )
 
 func main() {
-	ctx := context.Background()
+    ctx := context.Background()
 
-	// 1. Setup your rules
-	retryer := retry.New(
-		retry.WithMaxRetries(3),
-		retry.WithInitialDelay(100 * time.Millisecond),
-	)
+    body, err := retry.DoValue(ctx,
+        retry.New().
+            Attempts(4).
+            Backoff(retry.ExponentialJitter(500*time.Millisecond)).
+            OnRetry(func(attempt int, err error) {
+                log.Printf("attempt %d failed: %v", attempt, err)
+            }),
+        func() ([]byte, error) {
+            resp, err := http.Get("https://api.example.com/data")
+            if err != nil {
+                return nil, err
+            }
+            defer resp.Body.Close()
 
-	// 2. Wrap the risky operation
-	body, err := retry.Do(ctx, retryer, func(c context.Context) ([]byte, error) {
-		resp, err := http.Get("https://api.example.com/data")
-		if err != nil {
-			return nil, err // Network failure -> retry!
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 500 {
-			return nil, fmt.Errorf("server error: %d", resp.StatusCode) // Server error -> retry!
-		}
-
-		// Success!
-		return io.ReadAll(resp.Body) 
-	})
-
-	if err != nil {
-		fmt.Printf("Dead after all retries: %v\n", err)
-		return
-	}
-	
-	fmt.Printf("Successfully fetched %d bytes!\n", len(body))
+            if resp.StatusCode >= 500 {
+                return nil, fmt.Errorf("server error: %d", resp.StatusCode)
+            }
+            return io.ReadAll(resp.Body)
+        },
+    )
+    if err != nil {
+        log.Fatalf("all attempts failed: %v", err)
+    }
+    fmt.Printf("fetched %d bytes\n", len(body))
 }
 ```
 
 ---
 
-## 📖 Advanced Usage & Examples
+## 📐 Backoff Strategies
 
-### Using `RetryIf` to avoid retrying fatal errors
-Sometimes, an error means *"Game Over"* (e.g., `401 Unauthorized` or `sql.ErrNoRows`). Retrying won't change the outcome. Use `RetryIf` to abort early:
-
-```go
-retryer := retry.New(
-	retry.WithMaxRetries(5),
-	retry.WithRetryIf(func(err error) bool {
-		// Do NOT retry if it's a 4xx Client Error
-		if apiErr, ok := err.(APIError); ok && apiErr.Code >= 400 && apiErr.Code < 500 {
-			return false // Abort!
-		}
-		// Otherwise, keep retrying
-		return true
-	}),
-)
-```
-
-### Hooking into the lifecycle for Observability
-Need to plug this into Prometheus, DataDog, or just `log`? Use the `OnRetry` hook. It triggers right *before* the sleep occurs.
+All built-in strategies implement the `Backoff` type:
 
 ```go
-retryer := retry.New(
-	retry.WithMaxRetries(10),
-	retry.WithOnRetry(func(attempt int, err error, nextDelay time.Duration) {
-		log.Printf("⚠️ Attempt %d failed: %v. Resting for %v...", attempt+1, err, nextDelay)
-		// metrics.IncrementCounter("retry_events")
-	}),
-)
+type Backoff func(attempt int) time.Duration
 ```
 
-### Pure Error Handling (Without Generics)
-If your function just does side-effects (like deleting a file or writing to a socket) and returns `error`, just use `.Run()`:
+| Strategy | Formula | Description |
+|---|---|---|
+| `Constant(d)` | `d` | Same delay every time. Predictable, good for simple cases. |
+| `Linear(base)` | `attempt × base` | Grows proportionally. `base=500ms`: 500ms → 1s → 1.5s → ... |
+| `Exponential(base)` | `base × 2^(attempt-1)` | Doubles each time. `base=100ms`: 100ms → 200ms → 400ms → ... |
+| `ExponentialJitter(base)` | `[d/2, d]` random | Exponential + random spread. **Recommended for production.** |
 
-```go
-err := retryer.Run(ctx, func(c context.Context) error {
-	return db.ExecContext(c, "DELETE FROM users WHERE id = ?", userID)
-})
-```
-
-### Option 3: Package-Level Convenience Functions (Zero Boilerplate)
-
-For simple tasks where you don't need to hold onto a `Retryer` instance, use the package-level `retry.DoFunc` (for error-only operations) or `retry.DoValue[T]` (for operations returning a value and an error). They instantiate a `Retryer` under the hood.
-
-```go
-// DoFunc: When you only care about an error
-err := retry.DoFunc(ctx, func(c context.Context) error {
-	return pingService()
-}, retry.WithMaxRetries(5))
-
-// DoValue: When you expect a result back
-user, err := retry.DoValue(ctx, func(c context.Context) (*User, error) {
-	return fetchUser(c, id)
-}, retry.WithMaxRetries(3))
-```
+You can also provide any custom function matching `func(attempt int) time.Duration`.
 
 ---
 
-## ⚙️ Configuration Reference (Options)
+## ⚙️ API Reference
 
-By default, calling `retry.New()` gives you: 3 retries, starting at 100ms, capping at 10s, utilizing `x2` multiplications with jitter ON.
+### `retry.New() *Retry`
 
-You can tweak everything using the Functional Options:
+Creates a new `Retry` with defaults: **3 attempts**, **100ms constant backoff**.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `WithMaxRetries(int)` | `3` | Maximum number of **retries** before returning the error. |
-| `WithInitialDelay(Duration)` | `100ms` | The base backoff delay. |
-| `WithMultiplier(float64)` | `2.0` | Exponential factor. e.g: `100ms` -> `200ms` -> `400ms`. |
-| `WithMaxDelay(Duration)` | `10s` | Hard cap to prevent sleeps from taking hours. |
-| `WithJitter(bool)` | `true` | Introduces randomness to spread out retries. |
-| `WithBackoff(func)`| `ExponentialBackoff` | The algorithm used to space out sleep times. Try `ConstantBackoff(2*time.Second)` or roll your own. |
-| `WithOnRetry(func(...))` | `nil` | Lifecycle hook executed on failures. |
-| `WithOnSuccess(func(int))` | `nil` | Lifecycle hook executed when a previous failure eventually succeeds. |
-| `WithOnDrop(func(...))` | `nil` | Lifecycle hook executed when it gives up entirely due to MaxRetries. |
-| `WithRetryIf(func(err) bool)` | `nil` | A filter function to conditionally cancel retry loops. |
+### `(*Retry).Attempts(n int) *Retry`
+
+Sets the **total** number of times `fn` is called (including the first). Values `< 1` are treated as `1`.
+
+### `(*Retry).Backoff(b Backoff) *Retry`
+
+Sets the backoff strategy. Use the built-in helpers or a custom function.
+
+### `(*Retry).OnRetry(fn func(int, error)) *Retry`
+
+Registers a callback invoked before each sleep between attempts (not on the final failure).
+
+### `(*Retry).Do(ctx context.Context, fn func() error) error`
+
+Executes `fn` up to the configured number of attempts. Returns `nil` on first success, the last error if all attempts fail, or `ctx.Err()` if the context is cancelled while waiting.
+
+### `retry.DoValue[T](ctx, r, fn) (T, error)`
+
+Generic helper that wraps `Do` and returns a typed value alongside the error.
 
 ---
 
-## 🧠 Under the Hood: The Retry Execution Flow
-
-Here is how `goretry` processes your requests gracefully:
+## 🧠 Execution Flow
 
 ```mermaid
 flowchart TD
-    Start(["Start retry.Run/Do"]) --> ExecFunc["Execute User Function"]
-    ExecFunc --> CheckValid{"Success?"}
-    
-    CheckValid -->|"Yes"| Success(["Return Result"])
-    CheckValid -->|"No"| CheckFilter{"RetryIf filter passes?"}
-    
-    CheckFilter -->|"No"| MaxReached(["Return Error Immediately"])
-    CheckFilter -->|"Yes"| CheckMax{"Max attempts reached?"}
-    
-    CheckMax -->|"Yes"| MaxReached
-    CheckMax -->|"No"| CalcBackoff["Calculate Backoff (Exponential + Jitter)"]
-    
-    CalcBackoff --> TriggerHook["Execute OnRetry Hook"]
-    TriggerHook --> SleepPhase["Select Channel"]
-    
-    SleepPhase -->|"Timer fired"| ExecFunc
-    SleepPhase -->|"Context cancelled"| ContextCancelled(["Return Context Error"])
+    Start(["retry.Do / retry.DoValue"]) --> Exec["Execute fn()"]
+    Exec --> Ok{"err == nil?"}
+    Ok -->|"Yes"| ReturnNil(["return nil"])
+    Ok -->|"No"| Last{"Last attempt?"}
+    Last -->|"Yes"| ReturnErr(["return err"])
+    Last -->|"No"| Hook["Call OnRetry hook (if set)"]
+    Hook --> Sleep["Wait: backoff(attempt)"]
+    Sleep -->|"Timer fired"| Exec
+    Sleep -->|"ctx.Done()"| ReturnCtx(["return ctx.Err()"])
 ```
+
+---
+
+## 🧪 Testing
+
+Run the full test suite with the race detector:
+
+```bash
+go test -race -cover ./...
+```
+
+```
+ok  github.com/chmenegatti/go-retry  coverage: 89.4% of statements
+```
+
+Run benchmarks:
+
+```bash
+go test -bench=. -benchmem ./...
+```
+
+```
+BenchmarkRetrySuccess-12   443903150   2.626 ns/op   0 B/op   0 allocs/op
+BenchmarkRetryFailure-12           5   201000864 ns/op  502 B/op   6 allocs/op
+```
+
+> ✅ **0 allocations** on the success path. The library gets out of the way when it's not needed.
 
 ---
 
 ## 🤝 Contributing
 
-Pull requests are immensely welcome! 
+Pull requests are welcome!
 
 1. Fork it
-2. Create your feature branch (`git checkout -b feature/fooBar`)
-3. Commit your changes (`git commit -am 'Add some fooBar'`)
-4. Run tests (`go test -v -race ./...`)
-5. Push to the branch (`git push origin feature/fooBar`)
-6. Create a new Pull Request
+2. Create your feature branch: `git checkout -b feature/my-feature`
+3. Run tests: `go test -race ./...`
+4. Commit and push: `git commit -am 'feat: add ...'`
+5. Open a Pull Request
+
+---
 
 ## 📄 License
 
-MIT. See `LICENSE` for details.
+MIT. See [LICENSE](LICENSE) for details.
