@@ -1,3 +1,3 @@
-module github.com/chmenegatti/go-retry
+module github.com/chmenegatti/goretry
 
 go 1.25.4

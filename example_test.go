@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	retry "github.com/chmenegatti/go-retry"
+	retry "github.com/chmenegatti/goretry"
 )
 
 // ExampleNew demonstrates a basic retry with the default configuration.
