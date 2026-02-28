@@ -19,8 +19,8 @@ All of this with **Zero Dependencies**, fully relying on the Go standard library
 * 🎯 **Context First:** Cancellation (`ctx.Done()`) is respected immediately. No waiting for a 10-second sleep to finish before your goroutine can exit.
 * 🧬 **Generics Support:** Read your returned objects straight from the retry loop. No more awkward variable closures.
 * 🛑 **Smart Filtering:** Ignore specific errors (e.g., `400 Bad Request`) using `WithRetryIf` to save computing time.
-* 📈 **Sensible Defaults:** Exponential backoff with Full Jitter activated by default, preventing [Thundering Herds](https://en.wikipedia.org/wiki/Thundering_herd_problem).
-* 🪝 **Observability Ready:** Use hooks like `OnRetry` to log or ship metrics precisely when failures happen.
+* 📈 **Sensible Defaults:** Exponential backoff with Full Jitter activated by default, preventing [Thundering Herds](https://en.wikipedia.org/wiki/Thundering_herd_problem). **Pluggable** with `WithBackoff`.
+* 🪝 **Observability Ready:** Use hooks like `OnRetry`, `OnSuccess` and `OnDrop` to log or ship metrics precisely when failures and recoveries happen.
 * 🪶 **Featherweight:** 0 external dependencies. `stdlib` only!
 
 ---
@@ -146,7 +146,10 @@ You can tweak everything using the Functional Options:
 | `WithMultiplier(float64)` | `2.0` | Exponential factor. e.g: `100ms` -> `200ms` -> `400ms`. |
 | `WithMaxDelay(Duration)` | `10s` | Hard cap to prevent sleeps from taking hours. |
 | `WithJitter(bool)` | `true` | Introduces randomness to spread out retries. |
+| `WithBackoff(func)`| `ExponentialBackoff` | The algorithm used to space out sleep times. Try `ConstantBackoff(2*time.Second)` or roll your own. |
 | `WithOnRetry(func(...))` | `nil` | Lifecycle hook executed on failures. |
+| `WithOnSuccess(func(int))` | `nil` | Lifecycle hook executed when a previous failure eventually succeeds. |
+| `WithOnDrop(func(...))` | `nil` | Lifecycle hook executed when it gives up entirely due to MaxRetries. |
 | `WithRetryIf(func(err) bool)` | `nil` | A filter function to conditionally cancel retry loops. |
 
 ---

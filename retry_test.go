@@ -232,3 +232,70 @@ func TestDo_Failure(t *testing.T) {
 		t.Fatalf("expected zero value, got %v", val)
 	}
 }
+
+func TestRetryer_OnSuccess(t *testing.T) {
+	successCalled := false
+	var successAttempt int
+
+	r := New(
+		WithMaxRetries(3),
+		WithOnSuccess(func(attempt int) {
+			successCalled = true
+			successAttempt = attempt
+		}),
+	)
+	r.timer = &mockTimer{}
+
+	attempts := 0
+	err := r.Run(context.Background(), func(ctx context.Context) error {
+		attempts++
+		if attempts < 3 { // Fail on attempt 0 and 1
+			return errors.New("temp error")
+		}
+		return nil // Success on attempt 2
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !successCalled {
+		t.Fatal("expected OnSuccess to be called")
+	}
+	if successAttempt != 2 {
+		t.Fatalf("expected OnSuccess to be called with attempt 2, got %d", successAttempt)
+	}
+}
+
+func TestRetryer_OnDrop(t *testing.T) {
+	dropCalled := false
+	var dropAttempt int
+	var dropErr error
+	expectedErr := errors.New("permanent failure")
+
+	r := New(
+		WithMaxRetries(2),
+		WithOnDrop(func(attempt int, err error) {
+			dropCalled = true
+			dropAttempt = attempt
+			dropErr = err
+		}),
+	)
+	r.timer = &mockTimer{}
+
+	err := r.Run(context.Background(), func(ctx context.Context) error {
+		return expectedErr
+	})
+
+	if err != expectedErr {
+		t.Fatalf("expected error %v, got %v", expectedErr, err)
+	}
+	if !dropCalled {
+		t.Fatal("expected OnDrop to be called")
+	}
+	if dropAttempt != 2 { // MaxRetries
+		t.Fatalf("expected OnDrop attempt to be 2, got %d", dropAttempt)
+	}
+	if dropErr != expectedErr {
+		t.Fatalf("expected OnDrop err to be %v, got %v", expectedErr, dropErr)
+	}
+}

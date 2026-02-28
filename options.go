@@ -29,6 +29,18 @@ type Config struct {
 	// RetryIf is an optional function that determines whether a given error should be retried.
 	// If it returns false, the retry loop is aborted and the error is returned immediately.
 	RetryIf func(err error) bool
+
+	// Backoff is the algorithm used to calculate the delay between retries.
+	// If nil, ExponentialBackoff is used.
+	Backoff BackoffAlgorithm
+
+	// OnSuccess is a hook called when the operation succeeds after at least one failure.
+	// attempt is zero-indexed based on the retry attempts (1 means it succeeded on the first retry).
+	OnSuccess func(attempt int)
+
+	// OnDrop is a hook called when the Retryer gives up and returns the error (MaxRetries reached).
+	// attempt is the last attempt number that failed.
+	OnDrop func(attempt int, err error)
 }
 
 // Option represents a functional option for configuring a Retryer.
@@ -36,7 +48,7 @@ type Option func(*Config)
 
 // DefaultConfig returns a Config with sensible default values.
 func DefaultConfig() *Config {
-	return &Config{
+	cfg := &Config{
 		MaxRetries:   3,
 		InitialDelay: 100 * time.Millisecond,
 		MaxDelay:     10 * time.Second,
@@ -44,6 +56,8 @@ func DefaultConfig() *Config {
 		Jitter:       true, // Full jitter is recommended best practice
 		OnRetry:      func(attempt int, err error, nextDelay time.Duration) {},
 	}
+	cfg.Backoff = ExponentialBackoff(cfg)
+	return cfg
 }
 
 // WithMaxRetries sets the maximum number of retry attempts.
@@ -95,6 +109,33 @@ func WithRetryIf(condition func(err error) bool) Option {
 	return func(c *Config) {
 		if condition != nil {
 			c.RetryIf = condition
+		}
+	}
+}
+
+// WithBackoff sets a custom backoff algorithm.
+func WithBackoff(backoff BackoffAlgorithm) Option {
+	return func(c *Config) {
+		if backoff != nil {
+			c.Backoff = backoff
+		}
+	}
+}
+
+// WithOnSuccess sets a callback to be executed when the operation succeeds after failing at least once.
+func WithOnSuccess(onSuccess func(attempt int)) Option {
+	return func(c *Config) {
+		if onSuccess != nil {
+			c.OnSuccess = onSuccess
+		}
+	}
+}
+
+// WithOnDrop sets a callback to be executed when the maximum number of retries is reached.
+func WithOnDrop(onDrop func(attempt int, err error)) Option {
+	return func(c *Config) {
+		if onDrop != nil {
+			c.OnDrop = onDrop
 		}
 	}
 }

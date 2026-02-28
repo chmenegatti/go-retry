@@ -50,6 +50,9 @@ func (r *Retryer) Run(ctx context.Context, fn func(ctx context.Context) error) e
 		// Run the user function
 		err = fn(ctx)
 		if err == nil {
+			if attempt > 0 && r.cfg.OnSuccess != nil {
+				r.cfg.OnSuccess(attempt)
+			}
 			return nil // Success
 		}
 
@@ -60,11 +63,20 @@ func (r *Retryer) Run(ctx context.Context, fn func(ctx context.Context) error) e
 
 		// If this is the last attempt, don't sleep, just return the error
 		if attempt == r.cfg.MaxRetries {
+			if r.cfg.OnDrop != nil {
+				r.cfg.OnDrop(attempt, err)
+			}
 			break
 		}
 
 		// Calculate backoff
-		nextDelay := ExponentialBackoff(attempt, r.cfg)
+		var nextDelay time.Duration
+		if r.cfg.Backoff != nil {
+			nextDelay = r.cfg.Backoff(attempt)
+		} else {
+			// Fallback if somehow Backoff is nil, although DefaultConfig sets it
+			nextDelay = ExponentialBackoff(r.cfg)(attempt)
+		}
 
 		// Call the OnRetry hook
 		if r.cfg.OnRetry != nil {

@@ -27,7 +27,7 @@ func TestExponentialBackoff(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		delay := ExponentialBackoff(tc.attempt, cfg)
+		delay := ExponentialBackoff(cfg)(tc.attempt)
 		if delay != tc.expectedDelay {
 			t.Errorf("expected attempt %d to have delay %v, got %v", tc.attempt, tc.expectedDelay, delay)
 		}
@@ -43,7 +43,7 @@ func TestExponentialBackoff_Jitter(t *testing.T) {
 
 	// Due to randomness, we test bounds
 	for attempt := 0; attempt < 10; attempt++ {
-		delay := ExponentialBackoff(attempt, cfg)
+		delay := ExponentialBackoff(cfg)(attempt)
 
 		maxExpectedFloat := float64(cfg.InitialDelay) * math.Pow(cfg.Multiplier, float64(attempt))
 		maxExpected := time.Duration(maxExpectedFloat)
@@ -53,6 +53,17 @@ func TestExponentialBackoff_Jitter(t *testing.T) {
 
 		if delay < 0 || delay > maxExpected {
 			t.Errorf("attempt %d: jittered delay %v is outside [0, %v]", attempt, delay, maxExpected)
+		}
+	}
+}
+
+func TestConstantBackoff(t *testing.T) {
+	delay := 5 * time.Second
+	backoff := ConstantBackoff(delay)
+
+	for attempt := 0; attempt < 5; attempt++ {
+		if got := backoff(attempt); got != delay {
+			t.Errorf("expected attempt %d to have constant delay %v, got %v", attempt, delay, got)
 		}
 	}
 }
