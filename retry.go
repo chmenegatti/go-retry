@@ -109,3 +109,17 @@ func Do[T any](ctx context.Context, r *Retryer, fn func(ctx context.Context) (T,
 	})
 	return result, err
 }
+
+// DoFunc is a package-level convenience function to execute a function that returns an error
+// with the default Retryer settings, customized by the provided options.
+func DoFunc(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error {
+	r := New(opts...)
+	return r.Run(ctx, fn)
+}
+
+// DoValue is a package-level convenience function to execute a generic function that returns a value and an error
+// with the default Retryer settings, customized by the provided options.
+func DoValue[T any](ctx context.Context, fn func(ctx context.Context) (T, error), opts ...Option) (T, error) {
+	r := New(opts...)
+	return Do(ctx, r, fn)
+}

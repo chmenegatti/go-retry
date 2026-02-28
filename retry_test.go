@@ -299,3 +299,54 @@ func TestRetryer_OnDrop(t *testing.T) {
 		t.Fatalf("expected OnDrop err to be %v, got %v", expectedErr, dropErr)
 	}
 }
+
+func TestDoFunc(t *testing.T) {
+	attempts := 0
+	err := DoFunc(
+		context.Background(),
+		func(ctx context.Context) error {
+			attempts++
+			if attempts < 2 {
+				return errors.New("temp error")
+			}
+			return nil // Success
+		},
+		WithMaxRetries(2),
+		WithJitter(false),
+		WithInitialDelay(1*time.Millisecond),
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestDoValue(t *testing.T) {
+	attempts := 0
+	val, err := DoValue(
+		context.Background(),
+		func(ctx context.Context) (int, error) {
+			attempts++
+			if attempts < 2 {
+				return 0, errors.New("temp error")
+			}
+			return 42, nil // Success
+		},
+		WithMaxRetries(2),
+		WithJitter(false),
+		WithInitialDelay(1*time.Millisecond),
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if val != 42 {
+		t.Fatalf("expected value 42, got %v", val)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}

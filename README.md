@@ -18,6 +18,7 @@ All of this with **Zero Dependencies**, fully relying on the Go standard library
 
 * 🎯 **Context First:** Cancellation (`ctx.Done()`) is respected immediately. No waiting for a 10-second sleep to finish before your goroutine can exit.
 * 🧬 **Generics Support:** Read your returned objects straight from the retry loop. No more awkward variable closures.
+* ⚡ **Convenient API:** Package-level shortcuts like `retry.DoFunc` making it ready to use with zero friction for simple cases.
 * 🛑 **Smart Filtering:** Ignore specific errors (e.g., `400 Bad Request`) using `WithRetryIf` to save computing time.
 * 📈 **Sensible Defaults:** Exponential backoff with Full Jitter activated by default, preventing [Thundering Herds](https://en.wikipedia.org/wiki/Thundering_herd_problem). **Pluggable** with `WithBackoff`.
 * 🪝 **Observability Ready:** Use hooks like `OnRetry`, `OnSuccess` and `OnDrop` to log or ship metrics precisely when failures and recoveries happen.
@@ -129,6 +130,22 @@ If your function just does side-effects (like deleting a file or writing to a so
 err := retryer.Run(ctx, func(c context.Context) error {
 	return db.ExecContext(c, "DELETE FROM users WHERE id = ?", userID)
 })
+```
+
+### Option 3: Package-Level Convenience Functions (Zero Boilerplate)
+
+For simple tasks where you don't need to hold onto a `Retryer` instance, use the package-level `retry.DoFunc` (for error-only operations) or `retry.DoValue[T]` (for operations returning a value and an error). They instantiate a `Retryer` under the hood.
+
+```go
+// DoFunc: When you only care about an error
+err := retry.DoFunc(ctx, func(c context.Context) error {
+	return pingService()
+}, retry.WithMaxRetries(5))
+
+// DoValue: When you expect a result back
+user, err := retry.DoValue(ctx, func(c context.Context) (*User, error) {
+	return fetchUser(c, id)
+}, retry.WithMaxRetries(3))
 ```
 
 ---
