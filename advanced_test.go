@@ -166,3 +166,48 @@ func TestOnRetryHook(t *testing.T) {
 		t.Fatalf("expected 2 retries got %d", count)
 	}
 }
+
+func TestLinearBackoff(t *testing.T) {
+	b := Linear(100 * time.Millisecond)
+	for _, tt := range []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{1, 100 * time.Millisecond},
+		{2, 200 * time.Millisecond},
+		{3, 300 * time.Millisecond},
+	} {
+		if got := b(tt.attempt); got != tt.want {
+			t.Fatalf("Linear(%d): got %v, want %v", tt.attempt, got, tt.want)
+		}
+	}
+}
+
+func TestExponential_AttemptZero(t *testing.T) {
+	b := Exponential(100 * time.Millisecond)
+	if d := b(0); d != 100*time.Millisecond {
+		t.Fatalf("Exponential(0) should return base, got %v", d)
+	}
+}
+
+func TestExponentialJitter_AttemptZero(t *testing.T) {
+	b := ExponentialJitter(100 * time.Millisecond)
+	if d := b(0); d != 100*time.Millisecond {
+		t.Fatalf("ExponentialJitter(0) should return base, got %v", d)
+	}
+}
+
+func TestExponentialJitter_AttemptOne(t *testing.T) {
+	b := ExponentialJitter(100 * time.Millisecond)
+	d := b(1)
+	if d < 50*time.Millisecond || d > 100*time.Millisecond {
+		t.Fatalf("ExponentialJitter(1) out of range [50ms,100ms]: %v", d)
+	}
+}
+
+func TestPermanentError_ErrorString(t *testing.T) {
+	pErr := Permanent(errors.New("something went wrong"))
+	if pErr.Error() != "something went wrong" {
+		t.Fatalf("unexpected error string: %q", pErr.Error())
+	}
+}
