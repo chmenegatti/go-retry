@@ -5,121 +5,66 @@ import (
 	"time"
 )
 
-// timerAbstract is an interface for time operations to allow mocking in tests.
-type timerAbstract interface {
-	After(d time.Duration) <-chan time.Time
+type Retry struct {
+	attempts int
+	backoff  Backoff
+	onRetry  func(int, error)
 }
 
-// realTimer implements timerAbstract using the standard time package.
-type realTimer struct{}
-
-func (rt *realTimer) After(d time.Duration) <-chan time.Time {
-	return time.After(d)
-}
-
-// Retryer is responsible for executing functions with retry logic.
-type Retryer struct {
-	cfg   *Config
-	timer timerAbstract
-}
-
-// New creates a new Retryer with the provided options.
-func New(opts ...Option) *Retryer {
-	cfg := DefaultConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	return &Retryer{
-		cfg:   cfg,
-		timer: &realTimer{},
+func New() *Retry {
+	return &Retry{
+		attempts: 3,
+		backoff:  Constant(100 * time.Millisecond),
 	}
 }
 
-// Run executes the provided function. If the function returns an error, it will
-// be retried according to the Retryer's configuration.
-// It respects the context cancellation immediately.
-func (r *Retryer) Run(ctx context.Context, fn func(ctx context.Context) error) error {
+func (r *Retry) Attempts(n int) *Retry {
+	if n < 1 {
+		n = 1
+	}
+
+	r.attempts = n
+	return r
+}
+
+func (r *Retry) Backoff(b Backoff) *Retry {
+	r.backoff = b
+	return r
+}
+
+func (r *Retry) OnRetry(fn func(int, error)) *Retry {
+	r.onRetry = fn
+	return r
+}
+
+func (r *Retry) Do(ctx context.Context, fn func() error) error {
+
 	var err error
 
-	// Pre-check context
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
+	for attempt := 1; attempt <= r.attempts; attempt++ {
 
-	for attempt := 0; attempt <= r.cfg.MaxRetries; attempt++ {
-		// Run the user function
-		err = fn(ctx)
+		err = fn()
 		if err == nil {
-			if attempt > 0 && r.cfg.OnSuccess != nil {
-				r.cfg.OnSuccess(attempt)
-			}
-			return nil // Success
+			return nil
 		}
 
-		// Check if we should retry this error
-		if r.cfg.RetryIf != nil && !r.cfg.RetryIf(err) {
-			return err
-		}
-
-		// If this is the last attempt, don't sleep, just return the error
-		if attempt == r.cfg.MaxRetries {
-			if r.cfg.OnDrop != nil {
-				r.cfg.OnDrop(attempt, err)
-			}
+		if attempt == r.attempts {
 			break
 		}
 
-		// Calculate backoff
-		var nextDelay time.Duration
-		if r.cfg.Backoff != nil {
-			nextDelay = r.cfg.Backoff(attempt)
-		} else {
-			// Fallback if somehow Backoff is nil, although DefaultConfig sets it
-			nextDelay = ExponentialBackoff(r.cfg)(attempt)
+		if r.onRetry != nil {
+			r.onRetry(attempt, err)
 		}
 
-		// Call the OnRetry hook
-		if r.cfg.OnRetry != nil {
-			r.cfg.OnRetry(attempt, err, nextDelay)
-		}
+		delay := r.backoff(attempt)
 
-		// Wait for either the delay to pass or the context to be cancelled
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-r.timer.After(nextDelay):
-			// Proceed to the next attempt
+
+		case <-time.After(delay):
 		}
 	}
 
 	return err
-}
-
-// Do is a generic package-level helper that executes a function returning a value of type T
-// and an error. It wraps the execution in the provided Retryer.
-func Do[T any](ctx context.Context, r *Retryer, fn func(ctx context.Context) (T, error)) (T, error) {
-	var result T
-	err := r.Run(ctx, func(c context.Context) error {
-		v, err := fn(c)
-		if err != nil {
-			return err
-		}
-		result = v
-		return nil
-	})
-	return result, err
-}
-
-// DoFunc is a package-level convenience function to execute a function that returns an error
-// with the default Retryer settings, customized by the provided options.
-func DoFunc(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error {
-	r := New(opts...)
-	return r.Run(ctx, fn)
-}
-
-// DoValue is a package-level convenience function to execute a generic function that returns a value and an error
-// with the default Retryer settings, customized by the provided options.
-func DoValue[T any](ctx context.Context, fn func(ctx context.Context) (T, error), opts ...Option) (T, error) {
-	r := New(opts...)
-	return Do(ctx, r, fn)
 }
