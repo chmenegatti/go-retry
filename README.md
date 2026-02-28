@@ -177,23 +177,23 @@ Here is how `goretry` processes your requests gracefully:
 
 ```mermaid
 flowchart TD
-    Start([Start retry.Run/Do]) --> ExecFunc[Execute User Function]
-    ExecFunc --> CheckValid{Success?}
+    Start(["Start retry.Run/Do"]) --> ExecFunc["Execute User Function"]
+    ExecFunc --> CheckValid{"Success?"}
     
-    CheckValid -->|Yes| Success([Return Result])
-    CheckValid -->|No| CheckFilter{RetryIf filter passes?}
+    CheckValid -->|"Yes"| Success(["Return Result"])
+    CheckValid -->|"No"| CheckFilter{"RetryIf filter passes?"}
     
-    CheckFilter -->|No| MaxReached([Return Error Immediately])
-    CheckFilter -->|Yes| CheckMax{Max attempts reached?}
+    CheckFilter -->|"No"| MaxReached(["Return Error Immediately"])
+    CheckFilter -->|"Yes"| CheckMax{"Max attempts reached?"}
     
-    CheckMax -->|Yes| MaxReached
-    CheckMax -->|No| CalcBackoff[Calculate Backoff \n Exponential + Jitter]
+    CheckMax -->|"Yes"| MaxReached
+    CheckMax -->|"No"| CalcBackoff["Calculate Backoff (Exponential + Jitter)"]
     
-    CalcBackoff --> TriggerHook[Execute OnRetry Hook]
-    TriggerHook --> SleepPhase[Select Channel]
+    CalcBackoff --> TriggerHook["Execute OnRetry Hook"]
+    TriggerHook --> SleepPhase["Select Channel"]
     
-    SleepPhase -->|Timer fired| ExecFunc
-    SleepPhase -->|ctx.Done() triggered| ContextCancelled([Return Context Error])
+    SleepPhase -->|"Timer fired"| ExecFunc
+    SleepPhase -->|"Context cancelled"| ContextCancelled(["Return Context Error"])
 ```
 
 ---
