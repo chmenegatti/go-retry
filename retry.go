@@ -53,6 +53,11 @@ func (r *Retryer) Run(ctx context.Context, fn func(ctx context.Context) error) e
 			return nil // Success
 		}
 
+		// Check if we should retry this error
+		if r.cfg.RetryIf != nil && !r.cfg.RetryIf(err) {
+			return err
+		}
+
 		// If this is the last attempt, don't sleep, just return the error
 		if attempt == r.cfg.MaxRetries {
 			break
@@ -76,4 +81,19 @@ func (r *Retryer) Run(ctx context.Context, fn func(ctx context.Context) error) e
 	}
 
 	return err
+}
+
+// Do is a generic package-level helper that executes a function returning a value of type T
+// and an error. It wraps the execution in the provided Retryer.
+func Do[T any](ctx context.Context, r *Retryer, fn func(ctx context.Context) (T, error)) (T, error) {
+	var result T
+	err := r.Run(ctx, func(c context.Context) error {
+		v, err := fn(c)
+		if err != nil {
+			return err
+		}
+		result = v
+		return nil
+	})
+	return result, err
 }

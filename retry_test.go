@@ -152,3 +152,83 @@ func TestRetryer_PreCanceledContext(t *testing.T) {
 		t.Fatalf("expected 0 attempts for pre-canceled context, got %d", attempts)
 	}
 }
+
+func TestRetryer_RetryIf(t *testing.T) {
+	errDoNotRetry := errors.New("do not retry me")
+	errRetry := errors.New("retry me")
+
+	r := New(
+		WithMaxRetries(3),
+		WithRetryIf(func(err error) bool {
+			return err != errDoNotRetry
+		}),
+	)
+	r.timer = &mockTimer{}
+
+	// Test 1: Error that should NOT be retried
+	attempts1 := 0
+	err := r.Run(context.Background(), func(ctx context.Context) error {
+		attempts1++
+		return errDoNotRetry
+	})
+	if err != errDoNotRetry {
+		t.Fatalf("expected errDoNotRetry, got %v", err)
+	}
+	if attempts1 != 1 {
+		t.Fatalf("expected exactly 1 attempt due to RetryIf abort, got %d", attempts1)
+	}
+
+	// Test 2: Error that SHOULD be retried
+	attempts2 := 0
+	err = r.Run(context.Background(), func(ctx context.Context) error {
+		attempts2++
+		return errRetry
+	})
+	if err != errRetry {
+		t.Fatalf("expected errRetry, got %v", err)
+	}
+	if attempts2 != 4 { // 1 initial + 3 retries
+		t.Fatalf("expected exactly 4 attempts, got %d", attempts2)
+	}
+}
+
+func TestDo_Success(t *testing.T) {
+	r := New(WithMaxRetries(2))
+	r.timer = &mockTimer{}
+
+	attempts := 0
+	val, err := Do(context.Background(), r, func(ctx context.Context) (string, error) {
+		attempts++
+		if attempts < 2 {
+			return "", errors.New("temporary error")
+		}
+		return "success_value", nil
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if val != "success_value" {
+		t.Fatalf("expected 'success_value', got %v", val)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestDo_Failure(t *testing.T) {
+	r := New(WithMaxRetries(1))
+	r.timer = &mockTimer{}
+
+	expectedErr := errors.New("permanent error")
+	val, err := Do(context.Background(), r, func(ctx context.Context) (int, error) {
+		return 42, expectedErr
+	})
+
+	if err != expectedErr {
+		t.Fatalf("expected error %v, got %v", expectedErr, err)
+	}
+	if val != 0 {
+		t.Fatalf("expected zero value, got %v", val)
+	}
+}

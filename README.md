@@ -6,6 +6,8 @@
 
 - **Context First**: Fully respects `context.Context` cancellation immediately avoiding unnecessary delays.
 - **Fluent API**: Highly configurable with the Functional Options Pattern.
+- **Generics Support**: Native `Do[T]` function properly returns values avoiding clunky external variable closures.
+- **Retry Filtering**: `RetryIf` evaluates which errors should be ignored and bypass retrying.
 - **Advanced Backoff Algorithm**: Ships with Exponential Backoff + Full Jitter to prevent Thundering Herd problems.
 - **ObservabilityHooks**: Supports an `OnRetry` hook for lifecycle logging/metrics.
 - **Thread-Safe**: Safely use the initialized `Retryer` instances across multiple goroutines.
@@ -49,30 +51,31 @@ func main() {
 		}),
 	)
 
-	// 2. Wrap your risky operation
-	err := retryer.Run(ctx, func(c context.Context) error {
+	// 2. Wrap your risky operation and return a byte slice using the generic Do function
+	body, err := retry.Do(ctx, retryer, func(c context.Context) ([]byte, error) {
 		req, err := http.NewRequestWithContext(c, http.MethodGet, "https://api.example.com/data", nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode >= 500 {
-			return fmt.Errorf("server error: %d", resp.StatusCode) // Will trigger retry
+			return nil, fmt.Errorf("server error: %d", resp.StatusCode) // Will trigger retry
 		}
 
 		log.Println("Request succeeded!")
-		return nil
+		return io.ReadAll(resp.Body)
 	})
 
 	if err != nil {
 		log.Fatalf("Operation failed entirely: %v", err)
 	}
+	log.Printf("Data: %s\n", string(body))
 }
 ```
 
@@ -105,3 +108,4 @@ Run(ctx, func)
 - `WithMultiplier(float64)`: The exponential growth factor. Default `2.0`.
 - `WithJitter(bool)`: Toggles Full Jitter variation. Default `true`.
 - `WithOnRetry(func(attempt int, err error, nextDelay time.Duration))`: Hook injected right before sleeping.
+- `WithRetryIf(func(err error) bool)`: A filter to intercept errors and decide if it's worth retrying or bypass immediately.

@@ -25,6 +25,10 @@ type Config struct {
 	// OnRetry is a hook called before a retry occurs.
 	// attempt is zero-indexed based on the retry attempts (0 means first retry).
 	OnRetry func(attempt int, err error, nextDelay time.Duration)
+
+	// RetryIf is an optional function that determines whether a given error should be retried.
+	// If it returns false, the retry loop is aborted and the error is returned immediately.
+	RetryIf func(err error) bool
 }
 
 // Option represents a functional option for configuring a Retryer.
@@ -82,6 +86,15 @@ func WithOnRetry(onRetry func(attempt int, err error, nextDelay time.Duration)) 
 	return func(c *Config) {
 		if onRetry != nil {
 			c.OnRetry = onRetry
+		}
+	}
+}
+
+// WithRetryIf sets a condition function to determine if an error should trigger a retry.
+func WithRetryIf(condition func(err error) bool) Option {
+	return func(c *Config) {
+		if condition != nil {
+			c.RetryIf = condition
 		}
 	}
 }

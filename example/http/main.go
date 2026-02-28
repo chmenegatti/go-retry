@@ -34,39 +34,33 @@ func main() {
 
 	log.Println("Starting HTTP GET request...")
 
-	// Execute the operation wrapped in the retryer
-	err := retryer.Run(ctx, func(ctx context.Context) error {
+	// Execute the operation wrapped in the retryer to return a byte slice
+	body, err := retry.Do(ctx, retryer, func(ctx context.Context) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			return err // Network error, triggering a retry
+			return nil, err // Network error, triggering a retry
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode >= 500 {
 			// Simulate a recoverable server error
-			return fmt.Errorf("server returned status code: %d", resp.StatusCode)
+			return nil, fmt.Errorf("server returned status code: %d", resp.StatusCode)
 		}
 		if resp.StatusCode >= 400 {
-			// Usually we don't retry 4xx errors as they are client errors
-			// For demonstration, let's say we don't retry by returning a special wrapped error,
-			// or we can just return it and let the retryer retry anyway if we want.
-			// Let's keep it simple here.
-			return fmt.Errorf("client error: %d", resp.StatusCode)
+			return nil, fmt.Errorf("client error: %d", resp.StatusCode)
 		}
 
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Request successful! Response: %s\n", string(body[:min(len(body), 50)]))
-		return nil
+		return io.ReadAll(resp.Body)
 	})
 
 	if err != nil {
 		log.Fatalf("Operation failed completely after retries: %v\n", err)
 	} else {
-		log.Println("Operation completed successfully!")
+		log.Printf("Operation completed successfully! Response: %s\n", string(body[:min(len(body), 50)]))
 	}
 }
